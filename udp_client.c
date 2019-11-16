@@ -7,6 +7,18 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+struct header {
+	char magic1;
+	char magic2;
+	char opcode;
+	char payload_length;
+
+	uint32_t token;
+	uint32_t msg_id;
+};
+
+const int h_size = sizeof(struct header);
+
 #define MAGIC_NUMBER_1 'J'
 #define MAGIC_NUMBER_2 'T'
 
@@ -36,11 +48,32 @@
 #define EVENT_FORWARD 15
 #define EVENT_UNKNOWN 99
 
+#define OPCODE_SESSION_RESET 0x00
+#define OPCODE_MUST_LOGIN_FIRST 0xF0
+#define OPCODE_LOGIN 0x10
+#define OPCODE_LOGIN_SUCCESSFUL_ACK 0x80
+#define OPCODE_LOGIN_FAILED_ACK 0x81
+#define OPCODE_SUBSCRIBE 0x20
+#define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 0x90
+#define OPCODE_SUBSCRIBE_FAILED_ACK 0x91
+#define OPCODE_UNSUBSCRIBE 0x21
+#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 0xA0
+#define OPCODE_UNSUBSCRIBE_FAILED_ACK 0xA1
+#define OPCODE_POST 0x30
+#define OPCODE_POST_ACK 0xB0
+#define OPCODE_FORWARD 0xB1
+#define OPCODE_FORWARD_ACK 0x31
+#define OPCODE_RETRIEVE 0x40
+#define OPCODE_RETRIEVE_ACK 0xC0
+#define OPCODE_RETRIEVE_END_ACK 0xC1
+#define OPCODE_LOGOUT 0x1F
+#define OPCODE_LOGOUT_ACK 0x8F
+
 int main(int argc, char *argv[]) {
 	int connection_status;
 	int ret;
-	int sockfd_tx = 0;
-	int sockfd_rx = 0;
+	int sockfd = 0;
+	char user_input[1024];
 	char send_buffer[1024];
 	char recv_buffer[1024];
 	struct sockaddr_in serv_addr;
@@ -49,8 +82,8 @@ int main(int argc, char *argv[]) {
 	fd_set read_set;
 	FD_ZERO(&read_set);
 
-	sockfd_tx = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sockfd_tx < 0) {
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd < 0) {
 		printf("socket() error: %s.\n", strerror(errno));
 		return -1;
 	}
@@ -60,103 +93,81 @@ int main(int argc, char *argv[]) {
 	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	serv_addr.sin_port = htons(32000);
 
-	sockfd_rx = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sockfd_rx < 0) {
-		printf("socket() error: %s.\n", strerror(errno));
-		return -1;
-	}
-
 	memset(&my_addr, 0, sizeof(serv_addr));
 	my_addr.sin_family = AF_INET;
 	my_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	my_addr.sin_port = htons(31000);
 
-	bind(sockfd_rx, (struct sockaddr *) &my_addr, sizeof(my_addr));
-	connection_status = connect(sockfd_tx, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
-	if (connection_status < 0) {
-		printf("connect() error: %s.\n", strerror(errno));
-		return -1;
-	}
+	bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr));
+	// connection_status = connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+	// if (connection_status < 0) {
+	// 	printf("connect() error: %s.\n", strerror(errno));
+	// 	return -1;
+	// }
 
-	maxfd = sockfd_rx + 1;
+	maxfd = sockfd + 1;
 
 	int state = STATE_OFFLINE;
 	int event;
-	int token;
+	uint32_t token;
 
+	struct header *ph_send = (struct header *) send_buffer;
+	struct header *ph_recv = (struct header *) recv_buffer;
 	while (1) {
 
 		FD_SET(fileno(stdin), &read_set);
-		FD_SET(sockfd_rx, &read_set);
+		FD_SET(sockfd, &read_set);
 
 		select(maxfd, &read_set, NULL, NULL, NULL);
 
 		if (FD_ISSET(fileno(stdin), &read_set)) {
-			fgets(send_buffer, sizeof(send_buffer), stdin);
-			if (strncmp(send_buffer, "login#", strlen("login#")) == 0) {
-				event = EVENT_LOGIN;
-			} else if (strncmp(send_buffer, "post#", strlen("post#")) == 0) {
-				event = EVENT_POST;
-			} else if (strncmp(send_buffer, "retrieve#", strlen("retrieve#")) == 0) {
-				event = EVENT_RETRIEVE;
-			} else if (strncmp(send_buffer, "logout#", strlen("logout#")) == 0) {
-				event = EVENT_LOGOUT;
-			} else event = EVENT_UNKNOWN;
+			fgets(user_input, sizeof(user_input), stdin);
+			event = parse_event_from_input(user_input);
 
 			if (event == EVENT_LOGIN) {
-				
+				printf("INSIDE EVENT_LOGIN\n");
+				if (state == STATE_OFFLINE) {
+					printf("INSIDE EVENT_LOGIN + STATE_OFFLINE\n");
+					char *username_password = user_input + 6;
+					int m = strlen(username_password);
+
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send-> opcode = OPCODE_LOGIN;
+					ph_send->payload_length = m;
+					ph_send->token = 0;
+					ph_send->msg_id = 0;
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					memcpy(send_buffer + h_size, username_password, m);
+
+					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					state = STATE_LOGIN_SENT;
+				} else {
+					printf("Already logged in.\n");
+					continue;
+				}
 			}
 		}
 
-		if (FD_ISSET(sockfd_rx, &read_set)) {
+		if (FD_ISSET(sockfd, &read_set)) {
 
-		}
-
-		int m = 0;
-		if (strncmp(user_input, "post#", 5) == 0) {
-			m = strlen(user_input) - 5;
-			memcpy(send_buffer+4, user_input+5, m);
-
-			send_buffer[0] = 'J';
-			send_buffer[1] = 'T';
-			send_buffer[2] = 1;
-			send_buffer[3] = m;
-		} else if (strncmp(user_input, "retrieve#", 9) == 0) {
-			m = strlen(user_input) - 9;
-			memcpy(send_buffer+4, user_input+9, m);
-
-			send_buffer[0] = 'J';
-			send_buffer[1] = 'T';
-			send_buffer[2] = 3;
-			send_buffer[3] = m;
-		} else {
-			printf("Error: Unrecognized command format.\n");
-			continue;
-		}
-		ret = send(sockfd, send_buffer, m+4, 0);
-	
-		if (ret <= 0) {
-			printf("send() error: %s.\n", strerror(errno));
-			return -1;
-		}	
-
-		char server_response[1024];
-		recv(sockfd, &server_response, sizeof(server_response), 0);
-
-		if (server_response[0] != 'J' || server_response[1] != 'T') {
-			continue;
-		} else {
-			if (server_response[2] == 2) {
-				printf("%s\n", server_response+4);
-			} else if (server_response[2] == 4) {
-				printf("%s", server_response+4);
-			} else {
-				continue;
-			}
 		}
 	}
 
     close(sockfd);
 
     return 0;
+}
+
+int parse_event_from_input(char user_input[]) {
+	if (strncmp(user_input, "login#", strlen("login#")) == 0) {
+		return EVENT_LOGIN;
+	} else if (strncmp(user_input, "post#", strlen("post#")) == 0) {
+		return EVENT_POST;
+	} else if (strncmp(user_input, "retrieve#", strlen("retrieve#")) == 0) {
+		return EVENT_RETRIEVE;
+	} else if (strncmp(user_input, "logout#", strlen("logout#")) == 0) {
+		return EVENT_LOGOUT;
+	} else return EVENT_UNKNOWN;
 }
