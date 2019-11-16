@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ctype.h>
 
 struct header {
 	char magic1;
@@ -30,6 +31,7 @@ const int h_size = sizeof(struct header);
 #define STATE_SUBSCRIBE_SENT 5
 #define STATE_UNSUBSCRIBE_SENT 6
 #define STATE_RETRIEVE_SENT 7
+#define STATE_MESSAGE_FORWARD 8
 
 #define EVENT_LOGIN 1
 #define EVENT_SUCCESSFUL_LOGIN 2
@@ -147,7 +149,126 @@ int main(int argc, char *argv[]) {
 					printf("Already logged in.\n");
 					continue;
 				}
-			}
+			} else if (event == EVENT_POST) {
+				if (state == STATE_ONLINE) {
+					printf("INSIDE EVENT_POST + STATE_ONLINE\n");
+					char *text = user_input + 5;
+					int m = strlen(text);
+
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send-> opcode = OPCODE_POST;
+					ph_send->payload_length = m;
+					ph_send->token = token;
+					ph_send->msg_id = 0;
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					memcpy(send_buffer + h_size, text, m);
+
+					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					state = STATE_POST_SENT;
+				} else {
+					printf("error#must_login_first\n");
+					continue;
+				} 
+			} else if (event == EVENT_SUBSCRIBE) {
+				if (state == STATE_ONLINE) {
+					printf("INSIDE EVENT_SUBSCRIBE + STATE_ONLINE\n");
+					char *client = user_input + 10;
+					int m = strlen(client);
+
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send-> opcode = OPCODE_SUBSCRIBE;
+					ph_send->payload_length = m;
+					ph_send->token = token;
+					ph_send->msg_id = 0;
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					memcpy(send_buffer + h_size, client, m);
+
+					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					state = STATE_SUBSCRIBE_SENT;
+				} else {
+					printf("error#must_login_first\n");
+					continue;
+				} 
+			} else if (event == EVENT_UNSUBSCRIBE) {
+				if (state == STATE_ONLINE) {
+					printf("INSIDE EVENT_UNSUBSCRIBE + STATE_ONLINE\n");
+					char *client = user_input + 12;
+					int m = strlen(client);
+
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send-> opcode = OPCODE_UNSUBSCRIBE;
+					ph_send->payload_length = m;
+					ph_send->token = token;
+					ph_send->msg_id = 0;
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					memcpy(send_buffer + h_size, client, m);
+
+					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					state = STATE_UNSUBSCRIBE_SENT;
+				} else {
+					printf("error#must_login_first\n");
+					continue;
+				} 
+			} else if (event == EVENT_RETRIEVE) {
+				if (state == STATE_ONLINE) {
+					printf("INSIDE EVENT_RETRIEVE + STATE_ONLINE\n");
+					char *n = user_input + 9;
+					int m = strlen(n);
+					int num = 0;
+
+					if (isdigit(n)) num = n;
+
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send-> opcode = OPCODE_RETRIEVE;
+					ph_send->payload_length = m;
+					ph_send->token = token;
+					ph_send->msg_id = 0;
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					memcpy(send_buffer + h_size, num, m);
+
+					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					state = STATE_RETRIEVE_SENT;
+				} else {
+					printf("error#must_login_first\n");
+					continue;
+				} 
+			} else if (event == EVENT_FORWARD) {
+				if (state == STATE_ONLINE) {
+					printf("INSIDE EVENT_FORWWARD + STATE_ONLINE\n");
+					char *n = user_input + 9;
+					int m = strlen(n);
+					int num = 0;
+
+					if (isdigit(n)) num = n;
+
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send-> opcode = OPCODE_FORWARD_ACK;
+					ph_send->payload_length = m;
+					ph_send->token = token;
+					ph_send->msg_id = 0;
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					memcpy(send_buffer + h_size, num, m);
+
+					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					state = STATE_RETRIEVE_SENT;
+				} else {
+					printf("error#must_login_first\n");
+					continue;
+				}
+			} else if (event == EVENT_UNKNOWN) {
+				send_reset(sockfd, send_buffer, serv_addr);
+				state = STATE_OFFLINE;
+			}  
 		}
 
 		if (FD_ISSET(sockfd, &read_set)) {
@@ -170,4 +291,13 @@ int parse_event_from_input(char user_input[]) {
 	} else if (strncmp(user_input, "logout#", strlen("logout#")) == 0) {
 		return EVENT_LOGOUT;
 	} else return EVENT_UNKNOWN;
+}
+
+void send_reset(int sockfd, char send_buffer[], struct sockaddr_in serv_addr) {
+	memset(send_buffer, 0, sizeof(send_buffer));
+	send_buffer[0] = MAGIC_NUMBER_1;
+	send_buffer[1] = MAGIC_NUMBER_2;
+	send_buffer[2] = OPCODE_SESSION_RESET;
+
+	sendto(sockfd, send_buffer, h_size, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 }
