@@ -272,7 +272,19 @@ int main(int argc, char *argv[]) {
 		}
 
 		if (FD_ISSET(sockfd, &read_set)) {
+			ret = recv(sockfd, recv_buffer, sizeof(recv_buffer), 0);
+			event = parse_event_from_recv_message(recv_buffer);
 
+			if (event == EVENT_SUCCESSFUL_LOGIN) {
+				if (state == STATE_LOGIN_SENT) {
+					token = ph_recv->token;
+					state = STATE_ONLINE;
+
+					printf("login_ack#successful\n");
+				} else {
+					
+				}
+			}			
 		}
 	}
 
@@ -291,6 +303,12 @@ int parse_event_from_input(char user_input[]) {
 	} else if (strncmp(user_input, "logout#", strlen("logout#")) == 0) {
 		return EVENT_LOGOUT;
 	} else return EVENT_UNKNOWN;
+}
+
+int parse_event_from_recv_message(char recv_buffer[]) {
+	if (strncmp(recv_buffer, "login#", strlen("login#")) == 0) {
+		return EVENT_SUCCESSFUL_LOGIN;
+	}
 }
 
 void send_reset(int sockfd, char send_buffer[], struct sockaddr_in serv_addr) {
