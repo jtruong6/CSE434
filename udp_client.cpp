@@ -54,26 +54,26 @@ const int h_size = sizeof(struct header);
 #define EVENT_FORWARD_ACK 19
 #define EVENT_UNKNOWN 99
 
-#define OPCODE_SESSION_RESET 0x00
-#define OPCODE_MUST_LOGIN_FIRST 0xF0
-#define OPCODE_LOGIN 0x10
-#define OPCODE_LOGIN_SUCCESSFUL_ACK 0x80
-#define OPCODE_LOGIN_FAILED_ACK 0x81
-#define OPCODE_SUBSCRIBE 0x20
-#define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 0x90
-#define OPCODE_SUBSCRIBE_FAILED_ACK 0x91
-#define OPCODE_UNSUBSCRIBE 0x21
-#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 0xA0
-#define OPCODE_UNSUBSCRIBE_FAILED_ACK 0xA1
-#define OPCODE_POST 0x30
-#define OPCODE_POST_ACK 0xB0
-#define OPCODE_FORWARD 0xB1
-#define OPCODE_FORWARD_ACK 0x31
-#define OPCODE_RETRIEVE 0x40
-#define OPCODE_RETRIEVE_ACK 0xC0
-#define OPCODE_RETRIEVE_END_ACK 0xC1
-#define OPCODE_LOGOUT 0x1F
-#define OPCODE_LOGOUT_ACK 0x8F
+#define OPCODE_SESSION_RESET 0
+#define OPCODE_MUST_LOGIN_FIRST 240
+#define OPCODE_LOGIN 10
+#define OPCODE_LOGIN_SUCCESSFUL_ACK 80
+#define OPCODE_LOGIN_FAILED_ACK 81
+#define OPCODE_SUBSCRIBE 20
+#define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 90
+#define OPCODE_SUBSCRIBE_FAILED_ACK 91
+#define OPCODE_UNSUBSCRIBE 21
+#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 160
+#define OPCODE_UNSUBSCRIBE_FAILED_ACK 161
+#define OPCODE_POST 30
+#define OPCODE_POST_ACK 176
+#define OPCODE_FORWARD 177
+#define OPCODE_FORWARD_ACK 31
+#define OPCODE_RETRIEVE 40
+#define OPCODE_RETRIEVE_ACK 192
+#define OPCODE_RETRIEVE_END_ACK 193
+#define OPCODE_LOGOUT 41
+#define OPCODE_LOGOUT_ACK 143
 
 int parse_event_from_input(char user_input[]);
 int parse_event_from_recv_message(struct header* ph_recv);
@@ -140,14 +140,14 @@ int main(int argc, char *argv[]) {
 					memset(send_buffer, 0, sizeof(send_buffer));
 					ph_send->magic1 = MAGIC_NUMBER_1;
 					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send-> opcode = OPCODE_LOGIN;
+					ph_send->opcode = OPCODE_LOGIN;
 					ph_send->payload_length = m;
 					ph_send->token = 0;
 					ph_send->msg_id = 0;
 
 					memcpy(send_buffer + h_size, username_password, m);
 
-					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 					state = STATE_LOGIN_SENT;
 				} else {
 					printf("Already logged in.\n");
@@ -162,14 +162,14 @@ int main(int argc, char *argv[]) {
 					memset(send_buffer, 0, sizeof(send_buffer));
 					ph_send->magic1 = MAGIC_NUMBER_1;
 					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send-> opcode = OPCODE_POST;
+					ph_send->opcode = OPCODE_POST;
 					ph_send->payload_length = m;
 					ph_send->token = token;
 					ph_send->msg_id = 0;
 
 					memcpy(send_buffer + h_size, text, m);
 
-					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 					state = STATE_POST_SENT;
 				} else {
 					printf("error#must_login_first\n");
@@ -184,14 +184,14 @@ int main(int argc, char *argv[]) {
 					memset(send_buffer, 0, sizeof(send_buffer));
 					ph_send->magic1 = MAGIC_NUMBER_1;
 					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send-> opcode = OPCODE_SUBSCRIBE;
+					ph_send->opcode = OPCODE_SUBSCRIBE;
 					ph_send->payload_length = m;
 					ph_send->token = token;
 					ph_send->msg_id = 0;
 
 					memcpy(send_buffer + h_size, client, m);
 
-					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 					state = STATE_SUBSCRIBE_SENT;
 				} else {
 					printf("error#must_login_first\n");
@@ -206,14 +206,14 @@ int main(int argc, char *argv[]) {
                     memset(send_buffer, 0, sizeof(send_buffer));
 					ph_send->magic1 = MAGIC_NUMBER_1;
 					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send-> opcode = OPCODE_UNSUBSCRIBE;
+					ph_send->opcode = OPCODE_UNSUBSCRIBE;
 					ph_send->payload_length = m;
 					ph_send->token = token;
 					ph_send->msg_id = 0;
 
 					memcpy(send_buffer + h_size, client, m);
 
-					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 					state = STATE_UNSUBSCRIBE_SENT;
 				} else {
 					printf("error#must_login_first\n");
@@ -235,14 +235,14 @@ int main(int argc, char *argv[]) {
 					memset(send_buffer, 0, sizeof(send_buffer));
 					ph_send->magic1 = MAGIC_NUMBER_1;
 					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send-> opcode = OPCODE_RETRIEVE;
+					ph_send->opcode = OPCODE_RETRIEVE;
 					ph_send->payload_length = m;
 					ph_send->token = token;
 					ph_send->msg_id = 0;
 
 					memcpy(send_buffer + h_size, &num, m);
 
-					sendto(sockfd, send_buffer, h_size + m, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 					state = STATE_RETRIEVE_SENT;
 				} else {
 					printf("error#must_login_first\n");
@@ -255,12 +255,12 @@ int main(int argc, char *argv[]) {
 					memset(send_buffer, 0, sizeof(send_buffer));
 					ph_send->magic1 = MAGIC_NUMBER_1;
 					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send-> opcode = OPCODE_FORWARD_ACK;
+					ph_send->opcode = OPCODE_FORWARD_ACK;
 					ph_send->payload_length = 0;
 					ph_send->token = token;
 					ph_send->msg_id = 0;
 
-					sendto(sockfd, send_buffer, h_size, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 				} else {
 					printf("error#must_login_first\n");
 					continue;
@@ -407,9 +407,12 @@ int parse_event_from_input(char user_input[]) {
 }
 
 int parse_event_from_recv_message(struct header* ph_recv) {
+	printf("%x\n", ph_recv->opcode);
+	printf("%x\n", OPCODE_LOGIN_SUCCESSFUL_ACK);
 	if (ph_recv->opcode == OPCODE_MUST_LOGIN_FIRST) {
 		return EVENT_MUST_LOGIN_FIRST;
 	} else if (ph_recv->opcode == OPCODE_LOGIN_SUCCESSFUL_ACK) {
+		printf("successful login ack\n");
 		return EVENT_SUCCESSFUL_LOGIN;
 	} else if (ph_recv->opcode == OPCODE_LOGIN_FAILED_ACK) {
 		return EVENT_FAILED_LOGIN;

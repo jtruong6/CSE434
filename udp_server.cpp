@@ -52,26 +52,26 @@ const int h_size = sizeof(struct header);
 #define EVENT_FORWARD_ACK 19
 #define EVENT_UNKNOWN 99
 
-#define OPCODE_SESSION_RESET 0x00
-#define OPCODE_MUST_LOGIN_FIRST 0xF0
-#define OPCODE_LOGIN 0x10
-#define OPCODE_LOGIN_SUCCESSFUL_ACK 0x80
-#define OPCODE_LOGIN_FAILED_ACK 0x81
-#define OPCODE_SUBSCRIBE 0x20
-#define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 0x90
-#define OPCODE_SUBSCRIBE_FAILED_ACK 0x91
-#define OPCODE_UNSUBSCRIBE 0x21
-#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 0xA0
-#define OPCODE_UNSUBSCRIBE_FAILED_ACK 0xA1
-#define OPCODE_POST 0x30
-#define OPCODE_POST_ACK 0xB0
-#define OPCODE_FORWARD 0xB1
-#define OPCODE_FORWARD_ACK 0x31
-#define OPCODE_RETRIEVE 0x40
-#define OPCODE_RETRIEVE_ACK 0xC0
-#define OPCODE_RETRIEVE_END_ACK 0xC1
-#define OPCODE_LOGOUT 0x1F
-#define OPCODE_LOGOUT_ACK 0x8F
+#define OPCODE_SESSION_RESET 0
+#define OPCODE_MUST_LOGIN_FIRST 240
+#define OPCODE_LOGIN 10
+#define OPCODE_LOGIN_SUCCESSFUL_ACK 80
+#define OPCODE_LOGIN_FAILED_ACK 81
+#define OPCODE_SUBSCRIBE 20
+#define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 90
+#define OPCODE_SUBSCRIBE_FAILED_ACK 91
+#define OPCODE_UNSUBSCRIBE 21
+#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 160
+#define OPCODE_UNSUBSCRIBE_FAILED_ACK 161
+#define OPCODE_POST 30
+#define OPCODE_POST_ACK 176
+#define OPCODE_FORWARD 177
+#define OPCODE_FORWARD_ACK 31
+#define OPCODE_RETRIEVE 40
+#define OPCODE_RETRIEVE_ACK 192
+#define OPCODE_RETRIEVE_END_ACK 193
+#define OPCODE_LOGOUT 41
+#define OPCODE_LOGOUT_ACK 143
 
 struct session {
     std::string client_id;
@@ -88,12 +88,16 @@ std::unordered_map<u_int32_t, struct session*> all_sessions;
 std::unordered_map<std::string, std::string> user_info;
 
 u_int32_t extract_token_from_recv_msg(struct header *ph_recv);
-struct session* find_session_by_token(int token);
+struct session* find_session_by_token(u_int32_t token);
 int parse_event_from_recv_msg(struct header *ph_recv);
-int authenticate(char* user_id, char* password);
+int authenticate(std::string user_id, std::string password);
 int generate_token();
 
 int main() {
+    user_info["c1"] = "p1";
+    user_info["c2"] = "p2";
+    user_info["c3"] = "p3";
+    
     srand(time(0));
     int ret;
     int sockfd;
@@ -131,12 +135,17 @@ int main() {
             printf("recvfrom() error: %s.\n", strerror(errno));
             return -1;
         }
+        printf("%c\n", recv_buffer[2]);
 
         u_int32_t token = extract_token_from_recv_msg(ph_recv);
         current_session = find_session_by_token(token);
         int event = parse_event_from_recv_msg(ph_recv);
 
-        current_session->last_time = time(NULL);
+        if (current_session != NULL) {
+            current_session->last_time = time(NULL);
+        } else {
+            current_session = new session;
+        }
 
         if (event == EVENT_LOGIN) {
             char *id_password = recv_buffer + h_size;
@@ -168,13 +177,14 @@ int main() {
                 current_session->last_time = time(NULL);
                 current_session->client_addr = cli_addr;
 
-                all_sessions.insert(std::make_pair(current_session->token, current_session));
+                all_sessions[current_session->token] = current_session;
             } else {
                 ph_send->opcode = OPCODE_LOGIN_FAILED_ACK;
                 ph_send->token = 0;
             }
 
-            sendto(sockfd, send_buffer, h_size, 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+            printf("%x\n", send_buffer[2]);
+            sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
         } 
     }
 }
@@ -192,7 +202,9 @@ struct session* find_session_by_token(u_int32_t token) {
 }
 
 int parse_event_from_recv_msg(struct header *ph_recv) {
+    printf("inside parse event\n");
     if (ph_recv->opcode == OPCODE_LOGIN) {
+        printf("inside opcode login\n");
         return EVENT_LOGIN;
     } else if (ph_recv->opcode == OPCODE_POST) {
         return EVENT_POST;
