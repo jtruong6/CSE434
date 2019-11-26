@@ -75,6 +75,10 @@ const int h_size = sizeof(struct header);
 #define OPCODE_LOGOUT 0x1F
 #define OPCODE_LOGOUT_ACK 0x8F
 
+int parse_event_from_input(char user_input[]);
+int parse_event_from_recv_message(struct header* ph_recv);
+void send_reset(int sockfd, char send_buffer[], struct sockaddr_in serv_addr);
+
 int main(int argc, char *argv[]) {
 	int ret;
 	int sockfd = 0;
@@ -98,13 +102,15 @@ int main(int argc, char *argv[]) {
 	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	serv_addr.sin_port = htons(32000);
 
-	memset(&my_addr, 0, sizeof(serv_addr));
+	memset(&my_addr, 0, sizeof(my_addr));
 	my_addr.sin_family = AF_INET;
 	my_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	my_addr.sin_port = htons(31000);
 
-	bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr));
-
+	ret = ::bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr));
+	if (ret < 0) {
+		printf("Binding error!!!");
+	}
 	maxfd = sockfd + 1;
 
 	int state = STATE_OFFLINE;
@@ -267,7 +273,7 @@ int main(int argc, char *argv[]) {
 
 		if (FD_ISSET(sockfd, &read_set)) {
 			ret = recv(sockfd, recv_buffer, sizeof(recv_buffer), 0);
-			event = parse_event_from_recv_message(recv_buffer);
+			event = parse_event_from_recv_message(ph_recv);
 
 			if (event == EVENT_MUST_LOGIN_FIRST) {
 				if (state == STATE_OFFLINE) {
@@ -400,32 +406,32 @@ int parse_event_from_input(char user_input[]) {
 	} else return EVENT_UNKNOWN;
 }
 
-int parse_event_from_recv_message(char recv_buffer[]) {
-	if (recv_buffer[2] == OPCODE_MUST_LOGIN_FIRST) {
+int parse_event_from_recv_message(struct header* ph_recv) {
+	if (ph_recv->opcode == OPCODE_MUST_LOGIN_FIRST) {
 		return EVENT_MUST_LOGIN_FIRST;
-	} else if (recv_buffer[2] == OPCODE_LOGIN_SUCCESSFUL_ACK) {
+	} else if (ph_recv->opcode == OPCODE_LOGIN_SUCCESSFUL_ACK) {
 		return EVENT_SUCCESSFUL_LOGIN;
-	} else if (recv_buffer[2] == OPCODE_LOGIN_FAILED_ACK) {
+	} else if (ph_recv->opcode == OPCODE_LOGIN_FAILED_ACK) {
 		return EVENT_FAILED_LOGIN;
-	} else if (recv_buffer[2] == OPCODE_FORWARD) {
+	} else if (ph_recv->opcode == OPCODE_FORWARD) {
 		return EVENT_FORWARD;
-	} else if (recv_buffer[2] == OPCODE_POST_ACK) {
+	} else if (ph_recv->opcode == OPCODE_POST_ACK) {
 		return EVENT_POST_ACK;
-	} else if (recv_buffer[2] == OPCODE_SUBSCRIBE_SUCCESSFUL_ACK) {
+	} else if (ph_recv->opcode == OPCODE_SUBSCRIBE_SUCCESSFUL_ACK) {
 		return EVENT_SUCCESSFUL_SUBSCRIBE_ACK;
-	} else if (recv_buffer[2] == OPCODE_SUBSCRIBE_FAILED_ACK) {
+	} else if (ph_recv->opcode == OPCODE_SUBSCRIBE_FAILED_ACK) {
 		return EVENT_FAILED_UNSUBSCRIBE_ACK;
-	} else if (recv_buffer[2] == OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK) {
+	} else if (ph_recv->opcode == OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK) {
 		return EVENT_SUCCESSFUL_UNSUBSCRIBE_ACK;
-	} else if (recv_buffer[2] == OPCODE_UNSUBSCRIBE_FAILED_ACK) {
+	} else if (ph_recv->opcode == OPCODE_UNSUBSCRIBE_FAILED_ACK) {
 		return EVENT_FAILED_UNSUBSCRIBE_ACK;
-	} else if (recv_buffer[2] == OPCODE_RETRIEVE_ACK)  {
+	} else if (ph_recv->opcode == OPCODE_RETRIEVE_ACK)  {
 		return EVENT_RETRIEVE_ACK;
-	} else if (recv_buffer[2] == OPCODE_RETRIEVE_END_ACK) {
+	} else if (ph_recv->opcode == OPCODE_RETRIEVE_END_ACK) {
 		return EVENT_RETRIEVE_END_ACK;
-	} else if (recv_buffer[2] == OPCODE_LOGOUT_ACK) {
+	} else if (ph_recv->opcode == OPCODE_LOGOUT_ACK) {
 		return EVENT_SUCCESSFUL_LOGOUT;
-	} else if (recv_buffer[2] == OPCODE_SESSION_RESET) {
+	} else if (ph_recv->opcode == OPCODE_SESSION_RESET) {
 		return EVENT_UNKNOWN;
 	} else {
 		return EVENT_UNKNOWN;
@@ -434,14 +440,9 @@ int parse_event_from_recv_message(char recv_buffer[]) {
 
 void send_reset(int sockfd, char send_buffer[], struct sockaddr_in serv_addr) {
 	memset(send_buffer, 0, sizeof(send_buffer));
-	u_int32_t token = 0;
-	u_int32_t msg_id = 0;
 	send_buffer[0] = MAGIC_NUMBER_1;
 	send_buffer[1] = MAGIC_NUMBER_2;
 	send_buffer[2] = OPCODE_SESSION_RESET;
-	send_buffer[3] = 0;
-	send_buffer[4] = token;
-	send_buffer[8] = msg_id;
 
 	sendto(sockfd, send_buffer, h_size, 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 }
