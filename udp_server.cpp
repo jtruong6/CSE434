@@ -10,7 +10,9 @@
 #include <time.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 #include <string>
+#include <iostream>
 
 struct header {
 	char magic1;
@@ -53,7 +55,7 @@ const int h_size = sizeof(struct header);
 #define EVENT_UNKNOWN 99
 
 #define OPCODE_SESSION_RESET 0
-#define OPCODE_MUST_LOGIN_FIRST 240
+#define OPCODE_MUST_LOGIN_FIRST 50
 #define OPCODE_LOGIN 10
 #define OPCODE_LOGIN_SUCCESSFUL_ACK 80
 #define OPCODE_LOGIN_FAILED_ACK 81
@@ -61,17 +63,17 @@ const int h_size = sizeof(struct header);
 #define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 90
 #define OPCODE_SUBSCRIBE_FAILED_ACK 91
 #define OPCODE_UNSUBSCRIBE 21
-#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 160
-#define OPCODE_UNSUBSCRIBE_FAILED_ACK 161
+#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 100
+#define OPCODE_UNSUBSCRIBE_FAILED_ACK 101
 #define OPCODE_POST 30
-#define OPCODE_POST_ACK 176
-#define OPCODE_FORWARD 177
-#define OPCODE_FORWARD_ACK 31
+#define OPCODE_POST_ACK 31
+#define OPCODE_FORWARD 70
+#define OPCODE_FORWARD_ACK 71
 #define OPCODE_RETRIEVE 40
-#define OPCODE_RETRIEVE_ACK 192
-#define OPCODE_RETRIEVE_END_ACK 193
-#define OPCODE_LOGOUT 41
-#define OPCODE_LOGOUT_ACK 143
+#define OPCODE_RETRIEVE_ACK 41
+#define OPCODE_RETRIEVE_END_ACK 42
+#define OPCODE_LOGOUT 60
+#define OPCODE_LOGOUT_ACK 61
 
 struct session {
     std::string client_id;
@@ -79,13 +81,13 @@ struct session {
     time_t last_time;
     uint32_t token;
     int state;
-
-    std::unordered_set<std::string> subbed;
-    std::unordered_map<std::string, std::string> subbed_messages;
 };
 
+std::unordered_map<std::string, u_int32_t> client_tokens;
 std::unordered_map<u_int32_t, struct session*> all_sessions;
 std::unordered_map<std::string, std::string> user_info;
+std::unordered_map<std::string, std::unordered_set<std::string> > list_of_subscriptions;
+std::unordered_map<std::string, std::vector<std::string> > subscribed_messages;
 
 u_int32_t extract_token_from_recv_msg(struct header *ph_recv);
 struct session* find_session_by_token(u_int32_t token);
@@ -97,6 +99,14 @@ int main() {
     user_info["c1"] = "p1";
     user_info["c2"] = "p2";
     user_info["c3"] = "p3";
+
+    list_of_subscriptions["c1"] = std::unordered_set<std::string>();
+    list_of_subscriptions["c2"] = std::unordered_set<std::string>();
+    list_of_subscriptions["c3"] = std::unordered_set<std::string>();
+
+    subscribed_messages["c1"] = std::vector<std::string>();
+    subscribed_messages["c2"] = std::vector<std::string>();
+    subscribed_messages["c3"] = std::vector<std::string>();
     
     srand(time(0));
     int ret;
@@ -108,6 +118,7 @@ int main() {
     socklen_t len;
 
     struct session *current_session;
+    u_int32_t message_id = (u_int32_t) rand();
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -140,6 +151,7 @@ int main() {
         u_int32_t token = extract_token_from_recv_msg(ph_recv);
         current_session = find_session_by_token(token);
         int event = parse_event_from_recv_msg(ph_recv);
+        printf("event number: %d\n", event);
 
         if (current_session != NULL) {
             current_session->last_time = time(NULL);
@@ -147,6 +159,8 @@ int main() {
             current_session = new session;
         }
 
+        std::cout << "Client ID: " << current_session->client_id << " Token: " << token << std::endl;
+        printf("Before big if\n");
         if (event == EVENT_LOGIN) {
             char *id_password = recv_buffer + h_size;
             char *delimiter = strchr(id_password, '&');
@@ -178,13 +192,96 @@ int main() {
                 current_session->client_addr = cli_addr;
 
                 all_sessions[current_session->token] = current_session;
+                client_tokens[client_id] = current_session->token;
             } else {
                 ph_send->opcode = OPCODE_LOGIN_FAILED_ACK;
                 ph_send->token = 0;
             }
 
-            printf("%x\n", send_buffer[2]);
             sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+        } else if (event == EVENT_POST) {
+            if (current_session->state == STATE_ONLINE) {
+                for (auto user : user_info) {
+                    for (auto subscribed : list_of_subscriptions[user.first]) {
+                        if (subscribed.compare(current_session->client_id) == 0) {
+                            char *text = recv_buffer + h_size;
+                            char *payload = send_buffer + h_size;
+                            snprintf(payload, sizeof(send_buffer) - h_size, "<%s>%s", current_session->client_id.c_str(), text);
+                            int m = strlen(payload);
+
+                            if (client_tokens.find(user.first) != client_tokens.end()) {
+                                if (all_sessions.find(client_tokens.at(user.first)) != all_sessions.end()) {
+                                    std::unordered_map<u_int32_t, struct session*>::const_iterator target = all_sessions.find(client_tokens.at(user.first));
+
+                                    ph_send->magic1 = MAGIC_NUMBER_1;
+                                    ph_send->magic2 = MAGIC_NUMBER_2;
+                                    ph_send->opcode = OPCODE_FORWARD;
+                                    ph_send->payload_length = m;
+                                    ph_send->msg_id = ++message_id;
+
+                                    target->second->state = STATE_MSG_FORWARD;
+
+                                    sendto(sockfd, send_buffer, sizeof(send_buffer), 0, 
+                                        (struct sockaddr *) &target->second->client_addr, sizeof(target->second->client_addr));
+                                }
+                            }
+                            
+                            subscribed_messages.at(user.first).push_back(std::string(payload));
+                        }
+                    }
+                }
+
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->opcode = OPCODE_POST_ACK;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = 0;
+
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+            } else {
+                printf("User is not logged in.\n");
+            }
+        } else if (event == EVENT_FORWARD_ACK) {
+            if (current_session->state == STATE_MSG_FORWARD) {
+                printf("forward_ack#successful\n");
+                current_session->state = STATE_ONLINE;
+            }
+        } else if (event == EVENT_SUBSCRIBE) {
+            if (current_session->state == STATE_ONLINE) {
+                printf("Inside EVENT_SUBSCIBE\n");
+                char *c_id = recv_buffer + h_size;
+                char *delimiter = strchr(c_id, '\n');
+                *delimiter = 0;
+                std::string client_id = std::string(c_id);
+
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = 0;
+
+                if (list_of_subscriptions[current_session->client_id].find(client_id) == list_of_subscriptions[current_session->client_id].end()) {
+                    list_of_subscriptions[current_session->client_id].insert(client_id);
+                    ph_send->opcode = OPCODE_SUBSCRIBE_SUCCESSFUL_ACK;
+                } else {
+                    ph_send->opcode = OPCODE_SUBSCRIBE_FAILED_ACK;
+                }
+
+                for (auto x : list_of_subscriptions) {
+                    std::cout << "key - " << x.first << ": ";
+
+                    for (auto y : x.second) {
+                        std::cout << y;
+                    }
+
+                    printf("\n");
+                }
+
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+            } else {
+                printf("User is not logged in.\n");
+            }
         } 
     }
 }
@@ -197,17 +294,18 @@ struct session* find_session_by_token(u_int32_t token) {
     if (all_sessions.find(token) == all_sessions.end()) {
         return NULL;
     } else {
-        return all_sessions.at(token);
+        return all_sessions[token];
     }
 }
 
 int parse_event_from_recv_msg(struct header *ph_recv) {
-    printf("inside parse event\n");
+    printf("inside parse event - opcode received: %d\n", ph_recv->opcode);
     if (ph_recv->opcode == OPCODE_LOGIN) {
-        printf("inside opcode login\n");
         return EVENT_LOGIN;
     } else if (ph_recv->opcode == OPCODE_POST) {
         return EVENT_POST;
+    } else if (ph_recv->opcode == OPCODE_FORWARD_ACK) {
+        return EVENT_FORWARD_ACK;
     } else if (ph_recv->opcode == OPCODE_SUBSCRIBE) {
         return EVENT_SUBSCRIBE;
     } else if (ph_recv->opcode == OPCODE_UNSUBSCRIBE) {

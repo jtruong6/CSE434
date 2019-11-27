@@ -55,7 +55,7 @@ const int h_size = sizeof(struct header);
 #define EVENT_UNKNOWN 99
 
 #define OPCODE_SESSION_RESET 0
-#define OPCODE_MUST_LOGIN_FIRST 240
+#define OPCODE_MUST_LOGIN_FIRST 50
 #define OPCODE_LOGIN 10
 #define OPCODE_LOGIN_SUCCESSFUL_ACK 80
 #define OPCODE_LOGIN_FAILED_ACK 81
@@ -63,17 +63,17 @@ const int h_size = sizeof(struct header);
 #define OPCODE_SUBSCRIBE_SUCCESSFUL_ACK 90
 #define OPCODE_SUBSCRIBE_FAILED_ACK 91
 #define OPCODE_UNSUBSCRIBE 21
-#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 160
-#define OPCODE_UNSUBSCRIBE_FAILED_ACK 161
+#define OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK 100
+#define OPCODE_UNSUBSCRIBE_FAILED_ACK 101
 #define OPCODE_POST 30
-#define OPCODE_POST_ACK 176
-#define OPCODE_FORWARD 177
-#define OPCODE_FORWARD_ACK 31
+#define OPCODE_POST_ACK 31
+#define OPCODE_FORWARD 70
+#define OPCODE_FORWARD_ACK 71
 #define OPCODE_RETRIEVE 40
-#define OPCODE_RETRIEVE_ACK 192
-#define OPCODE_RETRIEVE_END_ACK 193
-#define OPCODE_LOGOUT 41
-#define OPCODE_LOGOUT_ACK 143
+#define OPCODE_RETRIEVE_ACK 41
+#define OPCODE_RETRIEVE_END_ACK 42
+#define OPCODE_LOGOUT 60
+#define OPCODE_LOGOUT_ACK 61
 
 int parse_event_from_input(char user_input[]);
 int parse_event_from_recv_message(struct header* ph_recv);
@@ -105,11 +105,11 @@ int main(int argc, char *argv[]) {
 	memset(&my_addr, 0, sizeof(my_addr));
 	my_addr.sin_family = AF_INET;
 	my_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-	my_addr.sin_port = htons(31000);
+	my_addr.sin_port = htons(0);
 
 	ret = ::bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr));
 	if (ret < 0) {
-		printf("Binding error!!!");
+		printf("Binding error!!!\n");
 	}
 	maxfd = sockfd + 1;
 
@@ -157,6 +157,7 @@ int main(int argc, char *argv[]) {
 				if (state == STATE_ONLINE) {
 					printf("INSIDE EVENT_POST + STATE_ONLINE\n");
 					char *text = user_input + 5;
+					printf("%s\n", text);
 					int m = strlen(text);
 
 					memset(send_buffer, 0, sizeof(send_buffer));
@@ -248,23 +249,6 @@ int main(int argc, char *argv[]) {
 					printf("error#must_login_first\n");
 					continue;
 				} 
-			} else if (event == EVENT_FORWARD_ACK) {
-				if (state == STATE_ONLINE) {
-					printf("INSIDE EVENT_FORWWARD_ACK + STATE_ONLINE\n");
-
-					memset(send_buffer, 0, sizeof(send_buffer));
-					ph_send->magic1 = MAGIC_NUMBER_1;
-					ph_send->magic2 = MAGIC_NUMBER_2;
-					ph_send->opcode = OPCODE_FORWARD_ACK;
-					ph_send->payload_length = 0;
-					ph_send->token = token;
-					ph_send->msg_id = 0;
-
-					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
-				} else {
-					printf("error#must_login_first\n");
-					continue;
-				}
 			} else if (event == EVENT_UNKNOWN) {
 				send_reset(sockfd, send_buffer, serv_addr);
 				state = STATE_OFFLINE;
@@ -305,6 +289,16 @@ int main(int argc, char *argv[]) {
                 if (state == STATE_ONLINE) {
                     char *text = recv_buffer + h_size;
                     printf("%s\n", text);
+
+					memset(send_buffer, 0, sizeof(send_buffer));
+					ph_send->magic1 = MAGIC_NUMBER_1;
+					ph_send->magic2 = MAGIC_NUMBER_2;
+					ph_send->opcode = OPCODE_FORWARD_ACK;
+					ph_send->payload_length = 0;
+					ph_send->token = token;
+					ph_send->msg_id = ph_recv->msg_id;
+
+					sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
                 } else {
                     send_reset(sockfd, send_buffer, serv_addr);
                     state = STATE_OFFLINE;
@@ -399,6 +393,10 @@ int parse_event_from_input(char user_input[]) {
 		return EVENT_LOGIN;
 	} else if (strncmp(user_input, "post#", strlen("post#")) == 0) {
 		return EVENT_POST;
+	} else if (strncmp(user_input, "subscribe#", strlen("subscribe#")) == 0) {
+		return EVENT_SUBSCRIBE;
+	} else if (strncmp(user_input, "unsubscribe#", strlen("unsubscribe#")) == 0) {
+		return EVENT_UNSUBSCRIBE;
 	} else if (strncmp(user_input, "retrieve#", strlen("retrieve#")) == 0) {
 		return EVENT_RETRIEVE;
 	} else if (strncmp(user_input, "logout#", strlen("logout#")) == 0) {
@@ -407,7 +405,7 @@ int parse_event_from_input(char user_input[]) {
 }
 
 int parse_event_from_recv_message(struct header* ph_recv) {
-	printf("%x\n", ph_recv->opcode);
+	printf("%d\n", ph_recv->opcode);
 
 	if (ph_recv->opcode == OPCODE_MUST_LOGIN_FIRST) {
 		return EVENT_MUST_LOGIN_FIRST;
