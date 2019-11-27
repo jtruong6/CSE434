@@ -284,19 +284,19 @@ int main(int argc, char *argv[]) {
 				}
 			} else if (event == EVENT_SUCCESSFUL_LOGIN) {
 				if (state == STATE_LOGIN_SENT) {
+					printf("login_ack#successful\n");
+					
 					token = ph_recv->token;
 					state = STATE_ONLINE;
-
-					printf("login_ack#successful\n");
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
                     state = STATE_OFFLINE;
 				}
 			} else if (event == EVENT_FAILED_LOGIN) {
                 if (state == STATE_LOGIN_SENT) {
-                    state = STATE_OFFLINE;
+                    printf("login_ack#failed\n");
 
-                    printf("login_ack#failed");
+                    state = STATE_OFFLINE;
                 } else {
                     send_reset(sockfd, send_buffer, serv_addr);
                     state = STATE_OFFLINE;
@@ -311,45 +311,45 @@ int main(int argc, char *argv[]) {
                 }
             } else if (event == EVENT_POST_ACK) {
 				if (state == STATE_POST_SENT) {
-					state = STATE_ONLINE;
-
 					printf("post_ack#successful\n");
+					
+					state = STATE_ONLINE;
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
 				}
 			} else if (event == EVENT_SUCCESSFUL_SUBSCRIBE_ACK) {
 				if (state == STATE_SUBSCRIBE_SENT) {
-					state = STATE_ONLINE;
-
 					printf("subscribe_ack#successful\n");
+					
+					state = STATE_ONLINE;
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
 				}
 			} else if (event = EVENT_FAILED_SUBSCRIBE_ACK) {
 				if (state == STATE_SUBSCRIBE_SENT) {
-					state = STATE_OFFLINE;
-
 					printf("subscribe_ack#failed\n");
+					
+					state = STATE_OFFLINE;
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
 				}
 			} else if (event == EVENT_SUCCESSFUL_UNSUBSCRIBE_ACK) {
 				if (state = STATE_UNSUBSCRIBE_SENT) {
-					state = STATE_ONLINE;
-
 					printf("unsubscribe_ack#successful\n");
+					
+					state = STATE_ONLINE;
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
 				}
 			} else if (event == EVENT_FAILED_UNSUBSCRIBE_ACK) {
 				if (state = STATE_UNSUBSCRIBE_SENT) {
-					state = STATE_ONLINE;
-
 					printf("unsubscribe_ack#failed\n");
+					
+					state = STATE_ONLINE;
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
@@ -364,20 +364,20 @@ int main(int argc, char *argv[]) {
 				}
 			} else if (event == EVENT_RETRIEVE_END_ACK) {
 				if (state = STATE_RETRIEVE_SENT) {
-					state = STATE_ONLINE;
-
 					printf("retrieve#successful\n");
+					
+					state = STATE_ONLINE;
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
 				}
 			} else if (event == EVENT_SUCCESSFUL_LOGOUT) {
 				if (state == STATE_LOGOUT_SENT) {
+					printf("logout_ack#successful\n");
+
 					state = STATE_OFFLINE;
 					event = EVENT_UNKNOWN;
 					token = 0;
-
-					printf("logout_ack#successful\n");
 				} else {
 					send_reset(sockfd, send_buffer, serv_addr);
 					state = STATE_OFFLINE;
@@ -408,11 +408,10 @@ int parse_event_from_input(char user_input[]) {
 
 int parse_event_from_recv_message(struct header* ph_recv) {
 	printf("%x\n", ph_recv->opcode);
-	printf("%x\n", OPCODE_LOGIN_SUCCESSFUL_ACK);
+
 	if (ph_recv->opcode == OPCODE_MUST_LOGIN_FIRST) {
 		return EVENT_MUST_LOGIN_FIRST;
 	} else if (ph_recv->opcode == OPCODE_LOGIN_SUCCESSFUL_ACK) {
-		printf("successful login ack\n");
 		return EVENT_SUCCESSFUL_LOGIN;
 	} else if (ph_recv->opcode == OPCODE_LOGIN_FAILED_ACK) {
 		return EVENT_FAILED_LOGIN;
