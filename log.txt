@@ -1,0 +1,2 @@
+[1574919000] Session reset initiated by client.
+[1574919025] Session destroyed by server.

@@ -33,6 +33,7 @@ const int h_size = sizeof(struct header);
 #define STATE_ONLINE 1
 #define STATE_MSG_FORWARD 2
 
+#define EVENT_SESSION_RESET 0
 #define EVENT_MUST_LOGIN_FIRST 1
 #define EVENT_LOGIN 2
 #define EVENT_SUCCESSFUL_LOGIN 3
@@ -52,9 +53,14 @@ const int h_size = sizeof(struct header);
 #define EVENT_RETRIEVE_END_ACK 17
 #define EVENT_FORWARD 18
 #define EVENT_FORWARD_ACK 19
+#define EVENT_SPURIOUS 20
+#define EVENT_SERVER_RESET 21
+#define EVENT_TO_SEND_RESET 22
 #define EVENT_UNKNOWN 99
 
 #define OPCODE_SESSION_RESET 0
+#define OPCODE_SPURIOUS 1
+#define OPCODE_SEND_RESET 2
 #define OPCODE_MUST_LOGIN_FIRST 50
 #define OPCODE_LOGIN 10
 #define OPCODE_LOGIN_SUCCESSFUL_ACK 80
@@ -94,8 +100,12 @@ struct session* find_session_by_token(u_int32_t token);
 int parse_event_from_recv_msg(struct header *ph_recv);
 int authenticate(std::string user_id, std::string password);
 int generate_token();
+void send_reset(int sockfd, char send_buffer[], struct sockaddr_in cli_addr);
 
 int main() {
+    FILE *file;
+	file = fopen("log.txt", "w+");
+
     user_info["c1"] = "p1";
     user_info["c2"] = "p2";
     user_info["c3"] = "p3";
@@ -146,21 +156,18 @@ int main() {
             printf("recvfrom() error: %s.\n", strerror(errno));
             return -1;
         }
-        printf("%c\n", recv_buffer[2]);
 
         u_int32_t token = extract_token_from_recv_msg(ph_recv);
         current_session = find_session_by_token(token);
         int event = parse_event_from_recv_msg(ph_recv);
-        printf("event number: %d\n", event);
 
         if (current_session != NULL) {
             current_session->last_time = time(NULL);
         } else {
             current_session = new session;
+            current_session->last_time = time(NULL);
         }
 
-        std::cout << "Client ID: " << current_session->client_id << " Token: " << token << std::endl;
-        printf("Before big if\n");
         if (event == EVENT_LOGIN) {
             char *id_password = recv_buffer + h_size;
             char *delimiter = strchr(id_password, '&');
@@ -217,6 +224,7 @@ int main() {
                                     ph_send->magic2 = MAGIC_NUMBER_2;
                                     ph_send->opcode = OPCODE_FORWARD;
                                     ph_send->payload_length = m;
+                                    ph_send->token = target->first;
                                     ph_send->msg_id = ++message_id;
 
                                     target->second->state = STATE_MSG_FORWARD;
@@ -226,7 +234,7 @@ int main() {
                                 }
                             }
                             
-                            subscribed_messages.at(user.first).push_back(std::string(payload));
+                            subscribed_messages[user.first].insert(subscribed_messages[user.first].begin(), std::string(payload));
                         }
                     }
                 }
@@ -240,16 +248,23 @@ int main() {
 
                 sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
             } else {
-                printf("User is not logged in.\n");
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);
             }
         } else if (event == EVENT_FORWARD_ACK) {
             if (current_session->state == STATE_MSG_FORWARD) {
                 printf("forward_ack#successful\n");
                 current_session->state = STATE_ONLINE;
+            } else {
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);
             }
         } else if (event == EVENT_SUBSCRIBE) {
             if (current_session->state == STATE_ONLINE) {
-                printf("Inside EVENT_SUBSCIBE\n");
                 char *c_id = recv_buffer + h_size;
                 char *delimiter = strchr(c_id, '\n');
                 *delimiter = 0;
@@ -261,29 +276,180 @@ int main() {
                 ph_send->token = current_session->token;
                 ph_send->msg_id = 0;
 
-                if (list_of_subscriptions[current_session->client_id].find(client_id) == list_of_subscriptions[current_session->client_id].end()) {
+                if (current_session->client_id.compare(client_id) != 0 && user_info.find(client_id) != user_info.end() &&
+                    list_of_subscriptions[current_session->client_id].find(client_id) == list_of_subscriptions[current_session->client_id].end()) {
                     list_of_subscriptions[current_session->client_id].insert(client_id);
                     ph_send->opcode = OPCODE_SUBSCRIBE_SUCCESSFUL_ACK;
                 } else {
                     ph_send->opcode = OPCODE_SUBSCRIBE_FAILED_ACK;
                 }
 
-                for (auto x : list_of_subscriptions) {
-                    std::cout << "key - " << x.first << ": ";
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+            } else {
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);
+            }
+        } else if (event == EVENT_UNSUBSCRIBE) {
+            if (current_session->state == STATE_ONLINE) {
+                char *c_id = recv_buffer + h_size;
+                char *delimiter = strchr(c_id, '\n');
+                *delimiter = 0;
+                std::string client_id = std::string(c_id);
 
-                    for (auto y : x.second) {
-                        std::cout << y;
-                    }
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = 0;
 
-                    printf("\n");
+                if (list_of_subscriptions[current_session->client_id].find(client_id) != list_of_subscriptions[current_session->client_id].end()) {
+                    list_of_subscriptions[current_session->client_id].erase(client_id);
+                    ph_send->opcode = OPCODE_UNSUBSCRIBE_SUCCESSFUL_ACK;
+                } else {
+                    ph_send->opcode = OPCODE_UNSUBSCRIBE_FAILED_ACK;
                 }
 
                 sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
             } else {
-                printf("User is not logged in.\n");
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);
             }
-        } 
+        } else if (event == EVENT_RETRIEVE) {
+            if (current_session->state == STATE_ONLINE) {
+                char *n = recv_buffer + h_size;
+                int num_requested = atoi(n);
+                int num_to_retrieve = std::min(num_requested, static_cast<int>(subscribed_messages[current_session->client_id].size()));
+                
+                for (int i = 0; i < num_to_retrieve; i++) {
+                    std::string message = subscribed_messages[current_session->client_id].at(i);
+                    int m = strlen(message.c_str());
+
+                    ph_send->magic1 = MAGIC_NUMBER_1;
+                    ph_send->magic2 = MAGIC_NUMBER_2;
+                    ph_send->opcode = OPCODE_RETRIEVE_ACK;
+                    ph_send->payload_length = m;
+                    ph_send->token = current_session->token;
+                    ph_send->msg_id = ++message_id;
+
+                    memcpy(send_buffer + h_size, message.c_str(), m);
+
+                    sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+                }
+
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->opcode = OPCODE_RETRIEVE_END_ACK;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = ++message_id;
+
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+            } else {
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);
+            }
+        } else if (event == EVENT_LOGOUT) {
+            if (current_session->state == STATE_ONLINE) {
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->opcode = OPCODE_LOGOUT_ACK;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = 0;
+
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+            } else {
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);
+            }
+        } else if (event == EVENT_SPURIOUS) {
+            if (current_session->state == STATE_ONLINE) {
+                char message[] = "Session reset initiated by client.";
+                char timestamp[100];
+                sprintf(timestamp, "%ld", time(NULL));
+                char log[1024];
+
+                sprintf(log, "[%s] %s\n", timestamp, message);
+                printf("%s\n", log);
+                fputs(log, file);
+                fflush(file);
+
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->opcode = OPCODE_SPURIOUS;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = 0;
+
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+            } else {
+                printf("Error occurred. Resetting client session.\n");
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+                send_reset(sockfd, send_buffer, cli_addr);                
+            }
+        } else if (event == EVENT_TO_SEND_RESET) {
+            if (current_session->state == STATE_ONLINE) {
+                ph_send->magic1 = MAGIC_NUMBER_1;
+                ph_send->magic2 = MAGIC_NUMBER_2;
+                ph_send->opcode = OPCODE_SEND_RESET;
+                ph_send->payload_length = 0;
+                ph_send->token = current_session->token;
+                ph_send->msg_id = 0;
+
+                sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
+            }
+        } else if (event == EVENT_SESSION_RESET) {
+            if (current_session->state == STATE_ONLINE) {
+                char message[] = "Session destroyed by server.";
+                char timestamp[100];
+                sprintf(timestamp, "%ld", time(NULL));
+                char log[1024];
+
+                sprintf(log, "[%s] %s\n", timestamp, message);
+                printf("%s\n", log);
+                fputs(log, file);
+                fflush(file);
+                
+                all_sessions.erase(current_session->token);
+                delete(current_session);
+            }
+        } else if (event == EVENT_UNKNOWN) {
+            printf("Unknown command, resetting client session.\n");
+            all_sessions.erase(current_session->token);
+            delete(current_session);
+            send_reset(sockfd, send_buffer, cli_addr);
+        }
+
+        time_t current_time = time(NULL);
+
+        for (auto sessions : all_sessions) {
+            if (sessions.second != NULL) {
+                double seconds = difftime(current_time, sessions.second->last_time);
+                if (seconds > 60) {
+                    printf("Client session timeout - destroying client session of user: %s.\n", sessions.second->client_id.c_str());
+                    send_reset(sockfd, send_buffer, sessions.second->client_addr);
+                    all_sessions.erase(sessions.first);
+                }
+            }
+        }    
     }
+
+    return 0;
 }
 
 u_int32_t extract_token_from_recv_msg(struct header *ph_recv) {
@@ -299,7 +465,6 @@ struct session* find_session_by_token(u_int32_t token) {
 }
 
 int parse_event_from_recv_msg(struct header *ph_recv) {
-    printf("inside parse event - opcode received: %d\n", ph_recv->opcode);
     if (ph_recv->opcode == OPCODE_LOGIN) {
         return EVENT_LOGIN;
     } else if (ph_recv->opcode == OPCODE_POST) {
@@ -314,6 +479,12 @@ int parse_event_from_recv_msg(struct header *ph_recv) {
         return EVENT_RETRIEVE;
     } else if (ph_recv->opcode == OPCODE_LOGOUT) {
         return EVENT_LOGOUT;
+    } else if (ph_recv->opcode == OPCODE_SPURIOUS) {
+        return EVENT_SPURIOUS;
+    } else if (ph_recv->opcode == OPCODE_SEND_RESET) {
+        return EVENT_TO_SEND_RESET;
+    } else if (ph_recv->opcode == OPCODE_SESSION_RESET) {
+        return EVENT_SESSION_RESET;
     } else return EVENT_UNKNOWN;
 }
 
@@ -331,4 +502,13 @@ int authenticate(std::string user_id, std::string password) {
 
 int generate_token() {
     return rand();
+}
+
+void send_reset(int sockfd, char send_buffer[], struct sockaddr_in cli_addr) {
+	memset(send_buffer, 0, sizeof(send_buffer));
+	send_buffer[0] = MAGIC_NUMBER_1;
+	send_buffer[1] = MAGIC_NUMBER_2;
+	send_buffer[2] = OPCODE_SESSION_RESET;
+
+    sendto(sockfd, send_buffer, sizeof(send_buffer), 0, (struct sockaddr *) &cli_addr, sizeof(cli_addr));
 }
