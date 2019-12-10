@@ -105,12 +105,12 @@ int main(int argc, char *argv[]) {
 
 	memset(&serv_addr, 0, sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	serv_addr.sin_addr.s_addr = inet_addr("18.191.109.189");
 	serv_addr.sin_port = htons(32000);
 
 	memset(&my_addr, 0, sizeof(my_addr));
 	my_addr.sin_family = AF_INET;
-	my_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	my_addr.sin_addr.s_addr = inet_addr("0.0.0.0");
 	my_addr.sin_port = htons(0);
 
 	ret = ::bind(sockfd, (struct sockaddr *) &my_addr, sizeof(my_addr));
